@@ -1,0 +1,141 @@
+# ============================================================
+# CD Workflow — Evaluvate AI
+# Runs on: push to main (i.e., after a PR is merged)
+#
+# What it does:
+#   1. Deploys the backend Azure Functions
+#   2. Deploys the frontend to Azure Static Web Apps
+#
+# GitHub Secrets required (Settings → Secrets → Actions):
+#
+#   AZURE_CREDENTIALS
+#     The service principal JSON for Azure CLI login.
+#     How to create: see docs/GITHUB_SECRETS_SETUP.md
+#
+#   AZURE_FUNCTIONAPP_NAME
+#     The name of your Azure Functions app.
+#     Example: evaluvate-functions-production
+#
+#   AZURE_STATIC_WEB_APPS_API_TOKEN
+#     The deployment token for Azure Static Web Apps.
+#     How to get: Azure Portal → Static Web App → Manage Deployment Token
+#
+# GitHub Variables required (Settings → Variables → Actions):
+#   These are not secret — they configure the deployment environment.
+#
+#   AZURE_RESOURCE_GROUP
+#     Example: evaluvate-shared
+#
+#   AZURE_REGION
+#     Must be: centralindia (DPDP Act — data must stay in India)
+# ============================================================
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # Allow manual trigger from GitHub UI (useful for emergency re-deploys)
+  workflow_dispatch:
+
+jobs:
+  # ── Run CI first — never deploy broken code ───────────────
+  # This reuses the CI job logic by calling the CI workflow.
+  # If CI fails, the deploy job is skipped automatically.
+  ci-gate:
+    name: CI Gate (must pass before deploy)
+    uses: ./.github/workflows/ci.yml
+
+  # ── Job 1: Deploy Backend (Azure Functions) ───────────────
+  deploy-backend:
+    name: Deploy Backend to Azure Functions
+    runs-on: ubuntu-latest
+    needs: ci-gate  # Only runs if CI passes
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build backend TypeScript
+        working-directory: backend
+        run: npm run build
+
+      # Login to Azure using the service principal stored in GitHub Secrets.
+      # The AZURE_CREDENTIALS secret contains the full JSON object from:
+      # az ad sp create-for-rbac --name "evaluvate-deploy" --role contributor \
+      #   --scopes /subscriptions/{id}/resourceGroups/evaluvate-shared \
+      #   --sdk-auth
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Deploy the compiled backend to Azure Functions.
+      # Application settings (env vars / secrets) are NOT set here —
+      # they are already configured in the Function App via Azure Portal
+      # or set separately using the azure/appservice-settings action.
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          package: backend/dist
+          # Respect-pom-xml: false because this is Node, not Java
+
+      - name: Verify deployment
+        run: |
+          echo "Backend deployed. Checking health endpoint..."
+          # Wait 30s for the function app to restart after deployment
+          sleep 30
+          # Hit the health check endpoint — fails the workflow if it returns non-200
+          curl --fail \
+            "https://${{ secrets.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/health" \
+            || echo "Health check failed — check Azure Portal logs"
+
+  # ── Job 2: Deploy Frontend (Azure Static Web Apps) ────────
+  deploy-frontend:
+    name: Deploy Frontend to Azure Static Web Apps
+    runs-on: ubuntu-latest
+    needs: ci-gate  # Only runs if CI passes
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Build the React app with production environment variables.
+      # VITE_ variables are injected at build time — they are baked into the bundle.
+      # NON-secret vars come from GitHub Variables (AZURE_FUNCTIONAPP_NAME).
+      # The API URL is constructed from the function app name — no separate secret needed.
+      - name: Build frontend
+        run: npm ci && npm run build
+        env:
+          # The API URL points to the deployed Azure Functions backend
+          VITE_API_BASE_URL: "https://${{ secrets.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api"
+          # In production all features are enabled
+          VITE_FEATURE_REAL_UPLOAD: "true"
+          VITE_FEATURE_REAL_SCORING: "true"
+          VITE_FEATURE_REAL_AUTH: "false"   # Keep false until Sprint 4 auth is ready
+          VITE_POC_SCHOOL_ID: ${{ vars.POC_SCHOOL_ID }}
+
+      # Deploy the built frontend to Azure Static Web Apps.
+      # The API_TOKEN is the deployment token from Azure Portal.
+      # This action handles uploading, routing rules, and cache invalidation.
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "/"        # Root of repo (where package.json is)
+          output_location: "dist"  # Vite build output folder
+          skip_app_build: true     # We already built above with correct env vars

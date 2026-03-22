@@ -1,0 +1,32 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+
+    "GEMINI_API_KEY": "your_gemini_api_key_here",
+    "GEMINI_MODEL": "gemini-2.5-flash",
+
+    "AZURE_OPENAI_ENDPOINT": "",
+    "AZURE_OPENAI_API_KEY": "",
+    "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-4o",
+
+    "COSMOS_CONNECTION_STRING": "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMxZw==",
+    "COSMOS_DB_PREFIX": "school_",
+
+    "AZURE_STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
+    "AZURE_STORAGE_ANSWER_SHEETS_CONTAINER": "answer-sheets",
+    "AZURE_STORAGE_ANSWER_KEYS_CONTAINER": "answer-keys",
+    "AZURE_STORAGE_SAS_EXPIRY_MINUTES": "15",
+
+    "CONFIDENCE_THRESHOLD": "0.70",
+    "MAX_PAGES_PER_BATCH": "10",
+    "USD_TO_INR_RATE": "83.5",
+    "NODE_ENV": "development"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "http://localhost:8080",
+    "CORSCredentials": false
+  }
+}
